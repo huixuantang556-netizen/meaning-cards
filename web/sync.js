@@ -1,161 +1,57 @@
 'use strict';
-// Local-first, whole-library compare-and-swap. No privileged credentials.
-(async function () {
-  const $ = id => document.getElementById(id);
-  const status = text => $('syncStatus').textContent = text;
-  let client, user=null, state=null, busy=false, epoch=0, timer, conflictExported=false;
-  const config=window.MEANING_CONFIG||{};
-  const namespace='meaning-cloud-v1:'+config.supabaseUrl+':';
-  const storageKey=()=>namespace+user.id;
-  const clone=x=>JSON.parse(JSON.stringify(x));
-  const digest=x=>JSON.stringify(x);
-  function validate(list){
-    if(!Array.isArray(list)||list.length>5000||!list.every(c=>c&&typeof c.title==='string'&&typeof c.id==='string'))throw Error('卡片数据不兼容');
-    if(new Set(list.map(c=>c.id)).size!==list.length)throw Error('卡片 ID 重复');
-    if(JSON.stringify(list).length>1500000)throw Error('卡片库过大，请拆分备份');
-    return list.map(normalized);
-  }
-  function persist(){
-    try { localStorage.setItem(storageKey(),JSON.stringify(state)); }
-    catch(e){status('本地保存失败，请立即导出 JSON 备份，并释放浏览器空间。');throw e;}
-  }
-  function refresh(){renderGrid();pickMorning();if(activeView==='data')setView('data');}
-  function controls(){
-    $('accountLabel').textContent=user?'当前账户：'+user.email:'未登录 · 本机卡片库';
-    $('authFields').hidden=!!user;
-    ['syncNow','copyGuest','logout'].forEach(id=>$(id).disabled=!user);
-    $('conflictBox').hidden=!state?.conflict;
-  }
-  function showConflict(remote){
-    state.conflict=clone(remote);persist();conflictExported=false;controls();
-    status('同步冲突：本机修改已保留，请到「我的数据」处理两份版本。');
-  }
-  window.cloudSave=()=>{
-    if(!user){try{localStorage.setItem(KEY,JSON.stringify({version:1,cards}));status('本机卡片已保存 · 未登录');return true;}catch(e){status('保存失败，请立即导出 JSON 备份。');return false;}}
-    state.cards=clone(cards);state.dirty=true;state.op=crypto.randomUUID();
-    try{persist();}catch{return false;}
-    if(!state.conflict){status('本机已保存 · 等待同步');clearTimeout(timer);timer=setTimeout(sync,800);}
-    return true;
-  };
-  async function sync(){
-    // An open editor is a draft based on the current version. Do not replace it underneath the user.
-    if(!client||!user||busy||state.conflict||editing||(document.getElementById('taskDialog')?.open||(!state.dirty&&window.thoughtEditing))||document.hidden)return;
-    busy=true; const token=epoch, uid=user.id;
-    try{
-      status(navigator.onLine?'正在同步…':'离线 · 本机修改待联网同步');
-      const {data,error}=await client.from('meaning_libraries').select('revision,cards,last_op').eq('user_id',uid).maybeSingle();
-      if(error)throw error;if(token!==epoch)return;
-      const remote=data||{revision:0,cards:[],last_op:null};remote.cards=validate(remote.cards);
-      if(editing||(document.getElementById('taskDialog')?.open||(!state.dirty&&window.thoughtEditing)))return; // user opened editor while the fetch was pending
-      if(state.dirty){
-        if(remote.last_op===state.op){state.revision=remote.revision;state.dirty=false;persist();}
-        else if(remote.revision!==state.revision){showConflict(remote);return;}
-        else{
-          const sent=clone(state), {data:result,error:writeError}=await client.rpc('save_meaning_library',{
-            expected_revision:sent.revision,new_cards:sent.cards,operation_id:sent.op
-          });
-          if(writeError)throw writeError;if(token!==epoch)return;
-          if(!result.ok){showConflict(result.current);return;}
-          state.revision=result.current.revision;
-          // A later local edit stays pending; acknowledging an older upload never clears it.
-          if(state.op===sent.op)state.dirty=false;
-          persist();
-        }
-      }else if(remote.revision!==state.revision){
-        state.cards=remote.cards;state.revision=remote.revision;cards=clone(state.cards);persist();refresh();
-      }
-      status(state.dirty?'本机已保存 · 还有修改等待同步':'已同步 · '+new Date().toLocaleTimeString()+' · 每 15 秒检查');
-    }catch(e){status('同步未完成，本机内容保留：'+(e.message||'请检查网络和配置'));}
-    finally{busy=false;}
-  }
-  async function switchAccount(session){
-    const next=session?.user||null;if(next?.id===user?.id)return;
-    epoch++;window.meaningContext=epoch;closeReader();closeEditor();user=next;state=null;
-    if(user){
-      let cached=localStorage.getItem(storageKey());
-      if(cached){try{state=JSON.parse(cached);state.cards=validate(state.cards);}catch{status('账户缓存无法读取。请保留浏览器数据，联系维护者恢复。');throw Error('invalid cache');}}
-      else state={cards:[],revision:0,dirty:false,op:crypto.randomUUID(),conflict:null};
-      cards=clone(state.cards);controls();refresh();if(state.conflict){status('存在未处理的同步冲突，请到「我的数据」查看。');}else await sync();
-    }else{
-      const local=localStorage.getItem(KEY);cards=local?JSON.parse(local).cards.map(normalized):defaultCards();controls();refresh();status('本机模式 · 未登录');
-    }
-  }
-  // One editable tab per origin: prevents stale whole-library writes between browser tabs.
-  if(!navigator.locks){
-    status('此浏览器不支持安全的多标签页协调，云同步已禁用。请用最新版 Safari / Chrome 的 HTTPS 页面。');
-    ['sendCode','verifyCode','syncNow','copyGuest','logout'].forEach(id=>$(id).disabled=true);return;
-  }
-  let acquired;
-  const ready=new Promise(resolve=>acquired=resolve);
-  navigator.locks.request('meaning-studio-editor',{ifAvailable:true},lock=>{
-    acquired(!!lock);if(lock)return new Promise(()=>{});
-  });
-  if(!await ready){
-    const blocker=document.createElement('div');blocker.className='overlay open';blocker.style.zIndex='100';
-    const box=document.createElement('div');box.className='modal';box.textContent='另一个标签页正在使用卡片库。请关闭那个标签页，再刷新本页，以避免相互覆盖。';blocker.append(box);document.body.append(blocker);document.querySelector('.shell').inert=true;return;
-  }
-  controls();
-  $('syncNow').onclick=sync;
-  $('copyGuest').onclick=()=>{
-    if(!user||state.conflict)return;
-    if(!confirm('将本机卡片作为新卡片追加到账户？重复点击会再次复制。'))return;
-    const local=JSON.parse(localStorage.getItem(KEY)||'{"cards":[]}');
-    // Preserve internal task/card/override references when copying guest data.
-    const ids=new Map(local.cards.map(c=>[c.id,uuid()]));
-    const copied=local.cards.map(c=>{
-      let meaning=c.meaning;
-      if(c.tags?.includes('__meaning_v3__')){
-        try{const x=JSON.parse(meaning);if(x.card&&ids.has(x.card))x.card=ids.get(x.card);if(x.task&&ids.has(x.task))x.task=ids.get(x.task);meaning=JSON.stringify(x);}catch{}
-      }
-      return normalized({...c,id:ids.get(c.id),meaning,...(c.thought?{thought:window.MeaningThought.remap(c.thought,ids)}:{})});
-    });
-    cards=[...copied,...cards];save();refresh();
-  };
-  $('exportConflict').onclick=()=>{
-    download('冲突备份-'+Date.now()+'.json',JSON.stringify({format:'meaning-conflict-bundle',local:{cards:state.cards},cloud:{cards:state.conflict.cards},cloudRevision:state.conflict.revision},null,2));
-    conflictExported=true;toast('两份版本已打包下载，请确认文件已保存');
-  };
-  function resolveConflict(useLocal){
-    if(!state?.conflict)return;
-    if(!conflictExported){toast('请先下载冲突两份备份');return;}
-    if(!confirm('确认已保存冲突备份，并采用'+(useLocal?'本机':'云端')+'版本？未采用的内容可从冲突备份恢复。'))return;
-    state.revision=state.conflict.revision;
-    if(!useLocal)state.cards=validate(state.conflict.cards);
-    state.conflict=null;state.dirty=useLocal;state.op=crypto.randomUUID();cards=clone(state.cards);persist();controls();refresh();sync();
-  }
-  $('useLocal').onclick=()=>resolveConflict(true);$('useCloud').onclick=()=>resolveConflict(false);
-  if(!config.supabaseUrl||!config.publishableKey){
-    status('本机模式 · 部署者填写 config.js 后可启用跨设备同步');
-    $('sendCode').disabled=$('verifyCode').disabled=true;return;
-  }
-  if(!/^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(config.supabaseUrl)||!config.publishableKey.startsWith('sb_publishable_')){
-    status('同步配置无效：请使用 Supabase 项目 HTTPS 地址和 sb_publishable_ 公开键。');return;
-  }
-  try{
-    const {createClient}=await import('https://esm.sh/@supabase/supabase-js@2.57.4');
-    client=createClient(config.supabaseUrl,config.publishableKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false,storageKey:namespace+'auth'}});
-    window.askThoughtAI=async(payload)=>{if(!user)throw Error('请先登录后使用 AI');const {data,error}=await client.functions.invoke('thought-partner',{body:payload});if(error)throw error;if(typeof data?.text!=='string')throw Error('AI 回复格式不正确');return data.text;};
-    $('sendCode').onclick=async()=>{
-      const email=$('email').value.trim();if(!$('email').checkValidity()||!email){toast('请输入有效邮箱');return;}
-      $('sendCode').disabled=true;
-      try{const {error}=await client.auth.signInWithOtp({email});if(error)throw error;toast('已发送，请查看邮箱中的验证码');}
-      catch(e){status('验证码发送失败：'+e.message);}finally{$('sendCode').disabled=false;}
-    };
-    $('verifyCode').onclick=async()=>{
-      $('verifyCode').disabled=true;
-      try{const {data,error}=await client.auth.verifyOtp({email:$('email').value.trim(),token:$('otp').value.trim(),type:'email'});if(error)throw error;$('otp').value='';await switchAccount(data.session);}
-      catch(e){status('登录失败：'+e.message);}finally{$('verifyCode').disabled=false;}
-    };
-    $('logout').onclick=async()=>{
-      if(busy){toast('正在同步，请稍后退出');return;}
-      if(state?.dirty||state?.conflict){toast('还有未同步内容或冲突，请先同步并处理冲突后退出');return;}
-      const key=storageKey();const {error}=await client.auth.signOut({scope:'local'});if(error){status('退出失败：'+error.message);return;}
-      localStorage.removeItem(key);await switchAccount(null);
-    };
-    client.auth.onAuthStateChange((_event,session)=>{setTimeout(()=>switchAccount(session).catch(e=>status(e.message)),0);});
-    const {data,error}=await client.auth.getSession();if(error)throw error;await switchAccount(data.session);
-    setInterval(sync,15000);addEventListener('online',sync);document.addEventListener('visibilitychange',()=>{if(!document.hidden)sync();});
-    addEventListener('beforeunload',e=>{if(state?.dirty){e.preventDefault();e.returnValue='';}});
-    if(!user)status('同步已配置 · 请到「我的数据」用邮箱登录');
-  }catch(e){status('云同步加载失败，本机功能可继续使用：'+e.message);}
+/* Auth + encrypted synchronization adapter. No legacy plaintext writes. */
+(async function(){
+const $=id=>document.getElementById(id),V=window.MeaningPrivate,S=window.MeaningSecure,config=window.MEANING_CONFIG||{};
+const authNamespace='meaning-cloud-v1:'+config.supabaseUrl+':',identityKey='meaning-e2ee-identity:'+config.supabaseUrl;
+let client=null,user=null,engine=null,epoch=0,lastActivity=Date.now(),backupGeneration=-1,conflictExported=false,restorePreview=null,migration=null,guestCards=null,onlineBusy=false,suspended=false;
+const box=document.createElement('div');box.className='panel secure-account';box.id='secureAccount';box.innerHTML=`<h2>账号与加密同步</h2><p>登录确认资料归属，档案口令只在设备上解锁。云端保存密文；不会自动上传访客卡片。</p><p id="secureState" role="status" aria-live="polite"></p><div class="secure-actions"><button class="btn" id="secureOffline" hidden>打开上次账户的离线缓存</button><button class="btn" id="secureLock">锁定账号资料</button><button class="btn" id="secureBackup">下载全部资料加密备份</button></div><div id="secureUnlockBox" hidden><form id="secureUnlockForm"><label>档案口令<input type="password" id="securePass" autocomplete="off" minlength="12" required></label><button class="btn primary">解锁全部资料</button></form><p>忘记口令无法通过邮箱验证码解密。离线时可解锁本机已有缓存。</p><details><summary>首次创建或迁移到这个账号</summary><p>请选择准备上传的内容；原库和第一阶段密文会保留。不会把本地内容自动混入账号。</p><label><input type="checkbox" id="secureIncludeGuest">迁移本机访客卡片、思考和日程</label><label><input type="checkbox" id="secureIncludeLegacy">读取这个账号的旧版云端卡片（若曾使用过）</label><label><input type="checkbox" id="secureIncludePrivate">迁移第一阶段本地加密档案</label><label>第一阶段档案口令（仅本机解密）<input type="password" id="secureLegacyPass" autocomplete="off"></label><button class="btn" id="secureMigrationPreview">查看创建 / 迁移预览</button><div id="secureMigration"></div></details></div><details id="secureRestoreBox" hidden><summary>恢复全部资料的加密备份</summary><form id="secureRestoreForm"><label>账号加密备份<input type="file" id="secureRestoreFile" accept=".json,application/json" required></label><label>如果选择的是冲突备份，恢复其中哪一份？<select id="secureRestoreSide"><option value="local">本机版本</option><option value="cloud">云端版本</option></select></label><label>备份口令<input type="password" id="secureRestorePass" minlength="12" autocomplete="off" required></label><button class="btn">解密并预览</button></form><div id="secureRestorePreview"></div></details><p class="tip">旧的「原卡片 JSON 备份」可能包含明文，且不包含私密档案。统一备份会加密包含两者。退出不会删除已有密文缓存；原有明文访客数据仍保留以便回退。</p>`;
+$('view-data').querySelector('.page-head').after(box);
+const status=m=>{$('syncStatus').textContent=m;$('secureState').textContent=m;};
+function notify(){document.dispatchEvent(new Event('meaningsecurechange'));}
+function repaint(){renderGrid();pickMorning();if($('statusText'))$('statusText').textContent='当前共有 '+cards.length+' 张卡片（其中 '+cards.filter(c=>c.favorite).length+' 张收藏）。';document.dispatchEvent(new Event('meaningsecurechange'));}
+function clearUI(){closeReader();closeEditor();if($('taskDialog')?.open)$('taskDialog').close();cards=[];for(const el of document.querySelectorAll('textarea,input'))if(!['email','otp'].includes(el.id)&&el.type!=='file')el.value='';for(const id of ['readerBody','thoughtWorkspace','recoveryPreview'])$(id)?.replaceChildren();repaint();}
+function hydrate(){if(suspended||!engine?.unlocked)return;cards=engine.clear.library.cards.map(c=>({...normalized(c),...V.clone(c),category:Object.hasOwn(CAT,c.category)?c.category:'energy',tags:Array.isArray(c.tags)?c.tags:[]}));repaint();}
+function controls(){const unlocked=!!engine?.unlocked&&!suspended;$('accountLabel').textContent=user?'当前账户：'+(user.email||user.id):'未登录 · 本机卡片库';$('authFields').hidden=!!user;$('secureUnlockBox').hidden=!user||unlocked;$('secureRestoreBox').hidden=!unlocked;['secureLock','secureBackup'].forEach(id=>$(id).disabled=!engine);$('copyGuest').disabled=true;$('copyGuest').textContent='请使用上方的迁移预览';$('syncNow').disabled=$('logout').disabled=!user;$('conflictBox').hidden=!engine?.conflict;}
+function refreshEngine(info){if(info.message==='已读取云端新版本')hydrate();status(info.message);controls();notify();}
+async function request(uid,path,options={}){if(!client)throw Error('登录服务未联网，缓存可离线使用');const {data,error}=await client.auth.getSession();if(error||data?.session?.user?.id!==uid)throw Error('登录账户已变化，请重新登录');const token=data.session.access_token;const response=await fetch(config.supabaseUrl+'/rest/v1/'+path,{...options,headers:{apikey:config.publishableKey,Authorization:'Bearer '+token,'Content-Type':'application/json',...options.headers}});if(!response.ok)throw Error('云端请求失败（'+response.status+'），请检查登录、SQL 迁移和权限');return response.status===204?null:response.json();}
+function remote(uid){return {get:async()=>{const rows=await request(uid,'meaning_encrypted_libraries?select=revision,envelope,last_op&user_id=eq.'+encodeURIComponent(uid));if(!Array.isArray(rows)||rows.length>1)throw Error('云端返回格式不兼容');return rows[0]||null;},save:async(revision,envelope,op)=>request(uid,'rpc/save_meaning_encrypted_library',{method:'POST',body:JSON.stringify({expected_revision:revision,new_envelope:envelope,operation_id:op})})};}
+function idlePull(){return !suspended&&!editing&&!$('taskDialog')?.open&&!window.thoughtEditing&&activeView!=='private'&&!document.activeElement?.matches('input,textarea,select')&&!document.hidden;}
+async function sync(){if(!engine||onlineBusy)return;const current=engine;try{await current.sync({canPull:idlePull});}catch(e){if(current===engine)status(e.message+'；本机密文保留');}}
+async function lock(){if(!engine)return;const current=engine;suspended=true;backupGeneration=-1;clearUI();controls();setView('data');notify();try{await current.lock();if(current!==engine)return;clearUI();controls();setView('data');notify();}catch(e){status('还有未保存内容，请下载应急加密备份后重试：'+e.message);}}
+let switchQueue=Promise.resolve();function switchUser(next){switchQueue=switchQueue.catch(()=>{}).then(()=>switchActual(next));return switchQueue;}
+async function switchActual(next){if(next?.id===user?.id)return;if(!user)guestCards=V.clone(cards);suspended=true;clearUI();if(engine){await engine.flush();engine.dispose();}epoch++;window.meaningContext=epoch;clearUI();user=next;engine=null;suspended=false;migration=null;restorePreview=null;backupGeneration=-1;conflictExported=false;$('secureMigration').replaceChildren();$('secureRestorePreview').replaceChildren();
+ if(user){localStorage.setItem(identityKey,JSON.stringify({id:user.id,email:user.email||''}));engine=new S.Engine({owner:user.id,project:config.supabaseUrl,storage:localStorage,crypto,remote:remote(user.id),changed:refreshEngine});try{await engine.discover();}catch(e){status('联网检查未完成：'+e.message+'。已有缓存可解锁。');}controls();setView('data');status(engine.cache?'请用档案口令解锁。若有离线修改，将先保留本机版本。':'请在上方预览创建或迁移；只有确认后才会准备上传。');}
+ else{const saved=localStorage.getItem(KEY);cards=saved?JSON.parse(saved).cards.map(normalized):defaultCards();guestCards=null;controls();repaint();status('本机访客模式，未上传任何新内容');}
+ notify();}
+window.cloudSave=()=>{if(!user){try{localStorage.setItem(KEY,JSON.stringify({version:1,cards}));status('访客内容已保存到本机，未上传');return true;}catch{status('本机保存失败，请立即下载备份');return false;}}try{if(suspended||!engine?.unlocked)throw Error('请先解锁当前账号');engine.stageCards(cards);engine.flush().then(()=>{status('本机已加密保存，等待同步');setTimeout(sync,500);}).catch(e=>status('加密保存失败，请立即下载应急备份：'+e.message));return true;}catch(e){status(e.message);return false;}};
+window.AccountVault={get active(){return !!user;},get unlocked(){return !!engine?.unlocked&&!suspended;},get envelope(){return engine?.cache?.envelope||null;},state(){return engine?.unlocked&&!suspended?V.clone(engine.clear):null;},async writePrivate(next){const current=engine;if(!current||suspended)throw Error('请先登录并解锁');await current.replacePrivate(next);if(current!==engine)throw Error('账户已切换');setTimeout(sync,500);return V.clone(current.clear);},lock,backup:async()=>exportBackup(),goUnlock(){setView('data');$('securePass').focus();}};
+async function exportBackup(){if(!engine){toast('请先选择账户');return;}const current=engine;const backup=await current.backup();if(current!==engine)return;download('全部资料-账号加密备份-'+Date.now()+'.json',JSON.stringify(backup));backupGeneration=current.generation;status('已发起加密备份下载，请确认文件已保存');}
+$('secureBackup').onclick=()=>exportBackup().catch(e=>status(e.message));$('secureLock').onclick=lock;$('syncNow').onclick=sync;
+$('secureUnlockForm').onsubmit=async e=>{e.preventDefault();const current=engine,pass=$('securePass').value;$('securePass').value='';try{await current.unlock(pass);if(current!==engine)return;backupGeneration=-1;suspended=false;hydrate();controls();lastActivity=Date.now();await sync();}catch(e){status(e.message);}};
+$('secureMigrationPreview').onclick=async()=>{if(!engine||engine.cache){status('账户已有缓存，请先解锁，不能自动覆盖');return;}const current=engine,version=epoch;try{const result=[];if($('secureIncludeGuest').checked)result.push(...V.clone(guestCards||[]));if($('secureIncludeLegacy').checked){const rows=await request(user.id,'meaning_libraries?select=cards,revision&user_id=eq.'+encodeURIComponent(user.id));if(rows.length)result.push(...rows[0].cards);const cache=localStorage.getItem(authNamespace+user.id);if(cache){const saved=JSON.parse(cache);if(saved.dirty||saved.conflict)throw Error('旧同步缓存有未同步内容或冲突，请先保留旧版备份并处理后再迁移');}}
+ const seen=new Map();for(const c of result){const old=seen.get(c.id);if(old&&V.canonical(old)!==V.canonical(c))throw Error('访客与旧云端存在相同 ID 的不同内容，请分开备份核对；本次未合并');seen.set(c.id,c);}let privateState=V.empty();const password=$('secureLegacyPass').value;$('secureLegacyPass').value='';if($('secureIncludePrivate').checked){const encrypted=localStorage.getItem(V.KEY);if(!encrypted)throw Error('没有第一阶段本地档案');privateState=(await V.open(encrypted,password,crypto)).state;}
+ if(version!==epoch||current!==engine)return;migration={engine:current,cards:[...seen.values()],privateState};$('secureMigration').innerHTML='<p>目标：'+esc(user.email||user.id)+'</p><p>卡片、日程及思考共 '+seen.size+' 条；新档案记录 '+privateState.records.length+' 条。原 ID 不变，原库保留。确认后将加密准备上传。</p><label>新账号档案口令<input type="password" id="secureNewPass" minlength="12" autocomplete="off"></label><label>再次输入<input type="password" id="secureNewPass2" minlength="12" autocomplete="off"></label><button class="btn" id="secureMigrationBackup">下载迁移前本地资料备份</button><label><input type="checkbox" id="secureMigrationConfirmed">我已确认备份已保存，并同意将这些资料绑定至上方账号后加密上传</label><button class="btn primary" id="secureMigrationApply">确认创建并开始同步</button>';let backed=false;$('secureMigrationBackup').onclick=()=>{download('迁移前访客卡片-明文请私下保管-'+Date.now()+'.json',JSON.stringify({cards:guestCards||[]}));const old=localStorage.getItem(V.KEY);if(old)download('迁移前第一阶段-加密-'+Date.now()+'.json',old);if($('secureIncludeLegacy').checked)download('迁移前旧账号卡片-明文请私下保管-'+Date.now()+'.json',JSON.stringify({cards:migration.cards}));backed=true;};$('secureMigrationApply').onclick=async()=>{if(!backed||!$('secureMigrationConfirmed').checked){status('先下载并确认迁移前备份');return;}const pass=$('secureNewPass').value;if(pass!==$('secureNewPass2').value){status('两次口令不一致');return;}$('secureNewPass').value=$('secureNewPass2').value='';try{if(migration.engine!==engine)throw Error('账户已变化');await current.create(pass,migration.cards,migration.privateState);if(current!==engine)return;suspended=false;migration=null;$('secureMigration').replaceChildren();hydrate();controls();await sync();}catch(e){status(e.message);}};
+ }catch(e){status('迁移预览未完成：'+e.message);}};
+$('exportConflict').onclick=()=>{try{download('账号密文-冲突两份-'+Date.now()+'.json',JSON.stringify(engine.conflictBackup()));conflictExported=true;status('请确认冲突备份下载后，再选择版本');}catch(e){status(e.message);}};
+for(const [id,local] of [['useLocal',true],['useCloud',false]])$(id).onclick=async()=>{try{if(!conflictExported||!confirm('确认两份冲突备份已保存，并采用'+(local?'本机':'云端')+'版本？'))return;await engine.resolve(local);conflictExported=false;hydrate();controls();await sync();}catch(e){status(e.message);}};
+$('secureRestoreForm').onsubmit=async e=>{e.preventDefault();try{const file=$('secureRestoreFile').files[0];if(!file||file.size>6000000)throw Error('请选择不超过 6 MB 的账号加密备份');const pass=$('secureRestorePass').value;$('secureRestorePass').value='';const current=engine,preview=await current.restore(JSON.parse(await file.text()),pass,$('secureRestoreSide').value);if(current!==engine)return;restorePreview={engine:current,preview,generation:current.generation};$('secureRestorePreview').innerHTML='<p>备份有 '+preview.state.library.cards.length+' 条旧卡片/思考/日程，以及 '+preview.state.records.length+' 条档案。确认后会替换账户资料并同步，仍须先下载当前备份。</p><label><input type="checkbox" id="secureRestoreConfirmed">我已确认当前完整加密备份已保存</label><button class="btn" id="secureRestoreApply">确认恢复</button>';$('secureRestoreApply').onclick=async()=>{try{const r=restorePreview;if(!r||r.engine!==engine||r.generation!==engine.generation)throw Error('资料已变化，请重新预览');if(backupGeneration!==engine.generation||!$('secureRestoreConfirmed').checked)throw Error('先下载并确认当前完整备份');await engine.applyRestore(r.preview);restorePreview=null;$('secureRestorePreview').replaceChildren();hydrate();controls();await sync();}catch(e){status(e.message);}};}catch(e){status(e.message);}};
+// Offline unlock uses only an explicitly selected, already cached account.
+let lastIdentity;try{lastIdentity=JSON.parse(localStorage.getItem(identityKey)||'null');}catch{}
+if(lastIdentity){$('secureOffline').hidden=false;$('secureOffline').onclick=()=>switchUser(lastIdentity).catch(e=>status(e.message));}
+// Install this wrapper after V2/V3/thought/private view wrappers have loaded.
+queueMicrotask(()=>{const before=setView;setView=function(v){if(user&&(suspended||!engine?.unlocked)&&v!=='data'){toast('请先在「我的数据」解锁账号');v='data';}return before(v);};});
+$('logout').onclick=async()=>{try{if(engine?.pending)await engine.flush();if(engine?.dirty&&!confirm('本机密文尚未同步。退出会保留密文缓存，之后需重新登录同步。仍退出吗？'))return;if(client){const {error}=await client.auth.signOut({scope:'local'});if(error)throw error;}else localStorage.removeItem(authNamespace+'auth');localStorage.removeItem(identityKey);await switchUser(null);}catch(e){status(e.message);}};
+setInterval(()=>{if(engine?.unlocked&&Date.now()-lastActivity>300000)lock();if(!document.hidden)sync();},15000);addEventListener('online',sync);document.addEventListener('input',()=>lastActivity=Date.now());document.addEventListener('pointerdown',()=>lastActivity=Date.now());
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&engine?.unlocked)lock();else if(!document.hidden)sync();});
+addEventListener('beforeunload',e=>{if(engine?.pending){e.preventDefault();e.returnValue='';}});addEventListener('storage',e=>{if(engine&&e.key===engine.key&&e.newValue!==engine.disk){status('另一个页面修改了账户缓存，请先备份并刷新');}});
+if(!navigator.locks||!crypto?.subtle){status('安全同步需要新版浏览器和 HTTPS；本机访客功能仍可使用');return;}
+let acquired;const ready=new Promise(resolve=>acquired=resolve);navigator.locks.request('meaning-studio-editor',{ifAvailable:true},lock=>{acquired(!!lock);if(lock)return new Promise(()=>{});});if(!await ready){document.querySelector('.shell').inert=true;const b=document.createElement('p');b.textContent='另一个标签页正在编辑本站，请关闭它后刷新。';document.body.append(b);return;}
+controls();if(!config.supabaseUrl||!config.publishableKey){$('sendCode').disabled=$('verifyCode').disabled=true;status('尚未配置 Supabase。不会上传任何内容；请等待后台配置与验收。');return;}
+if(!/^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(config.supabaseUrl)||!config.publishableKey.startsWith('sb_publishable_')){status('请使用 Supabase HTTPS 项目地址与公开 Publishable key');return;}
+try{const {createClient}=await import('https://esm.sh/@supabase/supabase-js@2.57.4');client=createClient(config.supabaseUrl,config.publishableKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,storageKey:authNamespace+'auth'}});
+ $('sendCode').onclick=async()=>{try{const email=$('email').value.trim();if(!email||!$('email').checkValidity())throw Error('请输入有效邮箱');const {error}=await client.auth.signInWithOtp({email,options:{emailRedirectTo:config.authRedirectUrl||'https://huixuantang556-netizen.github.io/meaning-cards/web/'}});if(error)throw error;status('登录邮件已发送。请在当前设备打开邮件中的登录链接；若邮件提供验证码，也可在下方输入。');}catch(e){status(e.message);}};
+ $('verifyCode').onclick=async()=>{try{const {data,error}=await client.auth.verifyOtp({email:$('email').value.trim(),token:$('otp').value.trim(),type:'email'});if(error)throw error;$('otp').value='';await switchUser(data.session.user);}catch(e){status(e.message);}};
+ client.auth.onAuthStateChange((_event,s)=>{setTimeout(()=>switchUser(s?.user||null).catch(e=>status(e.message)),0);});const {data,error}=await client.auth.getSession();if(error)throw error;await switchUser(data.session?.user||null);
+ window.askThoughtAI=async payload=>{if(!user||!engine?.unlocked)throw Error('先登录并解锁');const {data,error}=await client.functions.invoke('thought-partner',{body:payload});if(error)throw error;return data.text;};
+}catch(e){status('登录服务加载未完成，可选择上次账户离线解锁：'+e.message);}
 })();

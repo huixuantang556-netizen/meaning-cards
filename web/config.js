@@ -1,2 +1,6 @@
-// 仅填写公开连接信息。绝不能填 service_role、secret key、数据库密码或 GitHub PAT。
-window.MEANING_CONFIG = { supabaseUrl: "", publishableKey: "" };
+// Public browser configuration only. No secret, database password or vault passphrase.
+window.MEANING_CONFIG = {
+  "supabaseUrl": "https://ldwrvsekdyaelwwzpcgl.supabase.co",
+  "publishableKey": "sb_publishable_puyRdTEmrbP7lKPRlCL-Tw_IMX49CbL",
+  "authRedirectUrl": "https://huixuantang556-netizen.github.io/meaning-cards/web/"
+};

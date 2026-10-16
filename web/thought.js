@@ -17,7 +17,7 @@ const quick=document.createElement('button');quick.className='btn';quick.textCon
 function persist(next){
  if(context!==window.meaningContext){toast('账户已变化，请重新打开思考');return false;}
  next.thought.touchedAt=new Date().toISOString();const i=cards.findIndex(c=>c.id===next.id),all=cards.slice();if(i<0)all.push(next);else all[i]=next;
- cards=all;const ok=save();failed=ok===false;message(failed?'本地保存失败：文字仍在本页，请立即导出备份，暂勿关闭。':'已保存到本机 · 云端状态见页面上方');return !failed;
+ cards=all;const ok=save();failed=ok===false;message(failed?'本地保存失败：文字仍在本页，请立即导出备份，暂勿关闭。':(window.AccountVault?.active?'已提交加密保存 · 请以上方保存与同步状态为准':'已保存到本机 · 云端状态见页面上方'));return !failed;
 }
 function message(s){if($('thoughtSave'))$('thoughtSave').textContent=s;}
 function mutate(fn){const c=topic();if(!c)return false;const next={...c,thought:T.clone(c.thought)};fn(next.thought,next);return persist(next);}

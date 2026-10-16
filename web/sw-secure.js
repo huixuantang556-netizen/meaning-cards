@@ -1,0 +1,7 @@
+/* Cache public application assets only. Never intercept Supabase or private payloads. */
+const CACHE='meaning-e2ee-shell-v1';
+const FILES=['./','./index.html','./style.css','./v2.css','./v3.css','./thought.css','./private-vault.css','./secure-sync.css','./config.js','./app.js','./sync.js','./navigation-core.js','./v2.js','./v3.js','./thought-core.js','./thought.js','./private-core.js','./private-vault.js','./secure-core.js'];
+const paths=new Set(FILES.map(p=>new URL(p,self.location).pathname));
+self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES))));
+self.addEventListener('activate',e=>e.waitUntil((async()=>{for(const key of await caches.keys())if(key.startsWith('meaning-e2ee-shell-')&&key!==CACHE)await caches.delete(key);await self.clients.claim();})()));
+self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==self.location.origin||!paths.has(u.pathname))return;e.respondWith((async()=>{const cache=await caches.open(CACHE);try{const response=await fetch(e.request);if(response.ok)await cache.put(e.request,response.clone());return response;}catch(error){const saved=await cache.match(e.request,{ignoreSearch:true});if(saved)return saved;throw error;}})());});
