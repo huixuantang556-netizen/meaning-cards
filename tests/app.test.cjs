@@ -44,3 +44,6 @@ test('open editor defers pulling changes',async()=>{
 });
 
 test("original 15-card source is byte-for-byte preserved",()=>{const block=app.match(/const starter=(\[.*?\n\]);/s)[1];assert.equal(require("node:crypto").createHash("sha256").update(block).digest("hex"),"4a1e004269785d38462a16c4d9fe293fcc6b7b1a0addd448ad9e07dadb2d80aa");});
+test('copying guest V3 tasks to an account remaps linked cards and daily overrides together',async()=>{
+ const h=await syncHarness();const guest=[{id:'card',title:'认知卡'},{id:'task',title:'日程',tags:['__meaning_v3__'],meaning:JSON.stringify({v:3,kind:'task',card:'card'})},{id:'override',title:'状态',tags:['__meaning_v3__'],meaning:JSON.stringify({v:3,kind:'override',task:'task'})}];h.storage.set('meaning-studio-v1',JSON.stringify({cards:guest}));h.node('copyGuest').onclick();const copied=JSON.parse(h.run('JSON.stringify(cards)'));assert.equal(JSON.parse(copied[1].meaning).card,copied[0].id);assert.equal(JSON.parse(copied[2].meaning).task,copied[1].id);assert.notEqual(copied[0].id,'card');
+});
