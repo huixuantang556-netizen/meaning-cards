@@ -31,21 +31,22 @@
     status('同步冲突：本机修改已保留，请到「我的数据」处理两份版本。');
   }
   window.cloudSave=()=>{
-    if(!user){try{localStorage.setItem(KEY,JSON.stringify({version:1,cards}));status('本机卡片已保存 · 未登录');}catch(e){status('保存失败，请立即导出 JSON 备份。');}return;}
+    if(!user){try{localStorage.setItem(KEY,JSON.stringify({version:1,cards}));status('本机卡片已保存 · 未登录');return true;}catch(e){status('保存失败，请立即导出 JSON 备份。');return false;}}
     state.cards=clone(cards);state.dirty=true;state.op=crypto.randomUUID();
-    try{persist();}catch{return;}
+    try{persist();}catch{return false;}
     if(!state.conflict){status('本机已保存 · 等待同步');clearTimeout(timer);timer=setTimeout(sync,800);}
+    return true;
   };
   async function sync(){
     // An open editor is a draft based on the current version. Do not replace it underneath the user.
-    if(!client||!user||busy||state.conflict||editing||document.getElementById('taskDialog')?.open||document.hidden)return;
+    if(!client||!user||busy||state.conflict||editing||(document.getElementById('taskDialog')?.open||(!state.dirty&&window.thoughtEditing))||document.hidden)return;
     busy=true; const token=epoch, uid=user.id;
     try{
       status(navigator.onLine?'正在同步…':'离线 · 本机修改待联网同步');
       const {data,error}=await client.from('meaning_libraries').select('revision,cards,last_op').eq('user_id',uid).maybeSingle();
       if(error)throw error;if(token!==epoch)return;
       const remote=data||{revision:0,cards:[],last_op:null};remote.cards=validate(remote.cards);
-      if(editing||document.getElementById('taskDialog')?.open)return; // user opened editor while the fetch was pending
+      if(editing||(document.getElementById('taskDialog')?.open||(!state.dirty&&window.thoughtEditing)))return; // user opened editor while the fetch was pending
       if(state.dirty){
         if(remote.last_op===state.op){state.revision=remote.revision;state.dirty=false;persist();}
         else if(remote.revision!==state.revision){showConflict(remote);return;}
@@ -106,7 +107,7 @@
       if(c.tags?.includes('__meaning_v3__')){
         try{const x=JSON.parse(meaning);if(x.card&&ids.has(x.card))x.card=ids.get(x.card);if(x.task&&ids.has(x.task))x.task=ids.get(x.task);meaning=JSON.stringify(x);}catch{}
       }
-      return normalized({...c,id:ids.get(c.id),meaning});
+      return normalized({...c,id:ids.get(c.id),meaning,...(c.thought?{thought:window.MeaningThought.remap(c.thought,ids)}:{})});
     });
     cards=[...copied,...cards];save();refresh();
   };
@@ -133,6 +134,7 @@
   try{
     const {createClient}=await import('https://esm.sh/@supabase/supabase-js@2.57.4');
     client=createClient(config.supabaseUrl,config.publishableKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false,storageKey:namespace+'auth'}});
+    window.askThoughtAI=async(payload)=>{if(!user)throw Error('请先登录后使用 AI');const {data,error}=await client.functions.invoke('thought-partner',{body:payload});if(error)throw error;if(typeof data?.text!=='string')throw Error('AI 回复格式不正确');return data.text;};
     $('sendCode').onclick=async()=>{
       const email=$('email').value.trim();if(!$('email').checkValidity()||!email){toast('请输入有效邮箱');return;}
       $('sendCode').disabled=true;

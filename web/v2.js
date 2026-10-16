@@ -43,7 +43,7 @@
   const e = (s) => esc(String(s == null ? '' : s));
   function isLetter(c) { return Array.isArray(c?.tags) && c.tags.includes(NOTE_TAG); }
   function isObservation(c) { return Array.isArray(c?.tags) && c.tags.includes(OBS_TAG); }
-  function isSpecial(c) { return isLetter(c) || isObservation(c) || c.tags?.includes('__meaning_v3__'); }
+  function isSpecial(c) { return isLetter(c) || isObservation(c) || (c.tags?.includes('__meaning_v3__')||c.tags?.includes('__meaning_thought_v1__')); }
   function parseMeaning(value) {
     const full = String(value || '');
     const at = full.lastIndexOf(META_MARK);

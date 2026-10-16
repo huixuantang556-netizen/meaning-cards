@@ -9,7 +9,7 @@ function settings(){return records().find(x=>x.kind==='settings')||{kind:'settin
 function list(){return N.occurrences(records(),day());}
 function override(task,date,patch){const old=records().find(x=>x.kind==='override'&&x.task===task&&x.day===date);put({...old,kind:'override',task,day:date,...patch});}
 function defer(t){override(t.id,day(),{status:'deferred'});if(t.repeat==='once'){const source=records().find(x=>x.id===t.id);put({...source,date:N.shift(day(),1)});}}
-function ordinary(){return cards.filter(c=>!isNav(c)&&!c.tags?.includes('情绪私信')&&!c.tags?.includes('自我观察'));}
+function ordinary(){return cards.filter(c=>!isNav(c)&&!c.thought&&!c.tags?.includes('情绪私信')&&!c.tags?.includes('自我观察'));}
 // Filter reserved records before V2 readers see them. Saving/backup always use the full library.
 for(const name of ['renderGrid','pickMorning']){const old=name==='renderGrid'?renderGrid:pickMorning;const f=function(){const all=cards;try{cards=all.filter(c=>!isNav(c));old();}finally{cards=all;}};if(name==='renderGrid')renderGrid=f;else pickMorning=f;}
 const reminder=document.createElement('div');reminder.className='v3-global-reminder';reminder.hidden=true;reminder.setAttribute('role','status');reminder.setAttribute('aria-live','polite');const reminderText=document.createElement('span'),reminderButton=document.createElement('button');reminderButton.className='btn';reminderButton.textContent='回到今日导航';reminderButton.onclick=()=>setView('today');reminder.append(reminderText,reminderButton);document.querySelector('.tabs').after(reminder);
