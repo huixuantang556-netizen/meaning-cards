@@ -1,3 +1,13 @@
+# V3 已上线 · 今日导航与自我恢复
+
+当前入口：[有意义地生活 V3](https://huixuantang556-netizen.github.io/meaning-cards/web/)。新增可编辑日程、六种恢复入口、睡眠保护和娱乐计时，保留全部 V2 功能、原数据和 JSON 备份。14 项本地自动测试通过；线上资源已逐一核验。详见 [V3 更新、备份与回退](V3-更新与回退.md)。
+
+当前 Pages 使用 **main 分支 / (root)** 发布，保留 `/web/` 路径及根目录已有工具；不要套用下面旧版说明去切换发布来源。旧版说明提到的 `.github/workflows/pages.yml` 在现有仓库实际位于 `workflows/pages.yml`，不是已启用的自定义工作流；当前自动构建由 GitHub 的分支 Pages 流程完成。
+
+**Supabase 的线上公开配置仍为空，本次没有可连接的真实项目；登录和跨设备同步尚未实测。** 无需新增数据库表或迁移；继续保留原有 RLS 与版本冲突保护。仅配置公开 URL/publishable key，禁止提交私钥和私人备份。
+
+以下保留原版部署与 Supabase 说明供参考（实际发布来源以上述 V3 记录为准）。
+
 # 有意义地生活 · GitHub Pages + Supabase
 
 本项目直接从用户提供的 `behavior_meaning_cards.html` 拆分改造，保留原版 15 张卡片的全部文字、分类、晨间三张卡、搜索、阅读、模板生成、AI 提示词、编辑、删除、收藏、JSON 导入导出和恢复示例功能。没有把 AI API 密钥放到网页里；生成仍是本地模板 + 复制提示词到 ChatGPT。
