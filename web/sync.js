@@ -38,14 +38,14 @@
   };
   async function sync(){
     // An open editor is a draft based on the current version. Do not replace it underneath the user.
-    if(!client||!user||busy||state.conflict||editing||document.hidden)return;
+    if(!client||!user||busy||state.conflict||editing||document.getElementById('taskDialog')?.open||document.hidden)return;
     busy=true; const token=epoch, uid=user.id;
     try{
       status(navigator.onLine?'正在同步…':'离线 · 本机修改待联网同步');
       const {data,error}=await client.from('meaning_libraries').select('revision,cards,last_op').eq('user_id',uid).maybeSingle();
       if(error)throw error;if(token!==epoch)return;
       const remote=data||{revision:0,cards:[],last_op:null};remote.cards=validate(remote.cards);
-      if(editing)return; // user opened editor while the fetch was pending
+      if(editing||document.getElementById('taskDialog')?.open)return; // user opened editor while the fetch was pending
       if(state.dirty){
         if(remote.last_op===state.op){state.revision=remote.revision;state.dirty=false;persist();}
         else if(remote.revision!==state.revision){showConflict(remote);return;}
@@ -99,7 +99,16 @@
     if(!user||state.conflict)return;
     if(!confirm('将本机卡片作为新卡片追加到账户？重复点击会再次复制。'))return;
     const local=JSON.parse(localStorage.getItem(KEY)||'{"cards":[]}');
-    cards=[...local.cards.map(c=>normalized({...c,id:uuid()})),...cards];save();refresh();
+    // Preserve internal task/card/override references when copying guest data.
+    const ids=new Map(local.cards.map(c=>[c.id,uuid()]));
+    const copied=local.cards.map(c=>{
+      let meaning=c.meaning;
+      if(c.tags?.includes('__meaning_v3__')){
+        try{const x=JSON.parse(meaning);if(x.card&&ids.has(x.card))x.card=ids.get(x.card);if(x.task&&ids.has(x.task))x.task=ids.get(x.task);meaning=JSON.stringify(x);}catch{}
+      }
+      return normalized({...c,id:ids.get(c.id),meaning});
+    });
+    cards=[...copied,...cards];save();refresh();
   };
   $('exportConflict').onclick=()=>{
     download('冲突备份-'+Date.now()+'.json',JSON.stringify({format:'meaning-conflict-bundle',local:{cards:state.cards},cloud:{cards:state.conflict.cards},cloudRevision:state.conflict.revision},null,2));
