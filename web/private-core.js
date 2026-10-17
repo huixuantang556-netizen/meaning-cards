@@ -66,7 +66,7 @@ function apply(state,plan,choices,at,options={}){
  }
  if(!changed)throw Error('没有选择新的内容；未改动档案');
  if(options.archiveSources)for(const f of plan.sources)if(!n.sources.some(old=>old.name===f.name&&old.text===f.text))n.sources.push(clone(f));
- if(missingReferences(n).length)throw Error('所选条目引用了未导入的记录，请同时勾选依赖项或先导入基础资料包');
+ const missing=missingReferences(n);if(missing.length){const ids=[...new Set(missing.map(x=>x.to))];throw Error('尚未保存：以下关联记录未导入：'+ids.slice(0,20).join('、')+'。请展开对应编号并确认是否保存；有不同原文的条目只作为候选保留，不会合并定论。也可取消引用它们的条目。');}
  n.revision++;validate(n);return n;
 }
 function undo(state){if(!state.undo)throw Error('没有可撤销的操作');const n=clone(state.undo);n.revision=state.revision+1;n.undo=null;return validate(n);}
