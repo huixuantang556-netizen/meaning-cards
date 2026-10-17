@@ -232,12 +232,12 @@
   const habits=document.createElement('section');habits.className='view';habits.id='view-habits';
   habits.innerHTML=`<div class="page-head"><div class="kicker">FROM MEANING TO ACTION</div><h1>原子习惯实验室</h1><p>先理解为什么值得做，再观察真实阻力，给行为安排触发时机、环境和最小行动。没有连续打卡，也不会给“失败”扣分。</p></div>
     <div class="panel"><div class="v2-actions"><button class="btn primary" id="v2Enrich">为已有卡片补充行为设计示例</button><button class="btn" id="v2GoCards">回认知卡片库</button></div>
-    <p class="tip">仅对没有行为设计的卡片添加文字，并补一张「涂身体乳」卡。不会覆盖你已经编辑过的实际价值或身份宣言。修改前请先在「我的数据」导出备份。</p></div>
+    <p class="tip">仅对没有行为设计的卡片添加文字，并补一张「涂身体乳」卡。不会覆盖你已经编辑过的实际价值或身份宣言。修改前请先在「设置 → 账号与数据」导出备份。</p></div>
     <div class="v2-habits" id="v2HabitList"></div>`;
   main.append(habits);
   $('v2GoCards').addEventListener('click',()=>setView('cards'));
   $('v2Enrich').addEventListener('click',()=>{
-    if(!confirm('建议先到「我的数据」导出 JSON 备份。现在只为尚无行为设计的卡片补充示例，并补充身体乳卡片，是否继续？'))return;
+    if(!confirm('建议先到「设置 → 账号与数据」导出 JSON 备份。现在只为尚无行为设计的卡片补充示例，并补充身体乳卡片，是否继续？'))return;
     let count=0, skipped=0;
     for(const card of cards){
       if(isSpecial(card) || !meta[card.title])continue;

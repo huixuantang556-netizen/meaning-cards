@@ -20,7 +20,7 @@ function parseFiles(files){
   if(typeof f.text!=='string'||typeof f.name!=='string'||! /\.(json|md|txt)$/i.test(f.name))throw Error('文件读取失败');total+=new TextEncoder().encode(f.text).length;if(total>1000000)throw Error('一次导入最多约 1 MB，请分批处理');
   sources.push({name:f.name,text:f.text});if(!/\.json$/i.test(f.name))continue;
   let d;try{d=JSON.parse(f.text);}catch{throw Error('有 JSON 文件无法解析，请检查后重试');}
-  if(!['personal-knowledge-transfer-v1','personal-knowledge-transfer-patch-v1'].includes(d?.format))throw Error('这不是支持的资料交换格式；原程序备份请在「我的数据」恢复');
+  if(!['personal-knowledge-transfer-v1','personal-knowledge-transfer-patch-v1'].includes(d?.format))throw Error('这不是支持的资料交换格式；原程序备份请在「设置 → 账号与数据」恢复');
   for(const group of groups){
    if(d[group]!==undefined&&!Array.isArray(d[group]))throw Error('资料集合必须是数组');
    for(const value of d[group]||[]){

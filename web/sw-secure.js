@@ -1,6 +1,6 @@
 /* Cache public application assets only. Never intercept Supabase or private payloads. */
-const CACHE='meaning-e2ee-shell-v2';
-const FILES=['./','./index.html','./style.css','./v2.css','./v3.css','./thought.css','./private-vault.css','./secure-sync.css','./config.js','./app.js','./sync.js','./navigation-core.js','./v2.js','./v3.js','./thought-core.js','./thought.js','./private-core.js','./private-vault.js','./device-key.js','./secure-core.js'];
+const CACHE='meaning-e2ee-shell-v3';
+const FILES=['./','./index.html','./style.css','./v2.css','./v3.css','./thought.css','./private-vault.css','./secure-sync.css','./config.js','./app.js','./sync.js','./navigation-core.js','./v2.js','./v3.js','./thought-core.js','./thought.js','./private-core.js','./private-vault.js','./device-key.js','./secure-core.js','./studio-core.js','./studio.js','./studio.css'];
 const paths=new Set(FILES.map(p=>new URL(p,self.location).pathname));
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES))));
 self.addEventListener('activate',e=>e.waitUntil((async()=>{for(const key of await caches.keys())if(key.startsWith('meaning-e2ee-shell-')&&key!==CACHE)await caches.delete(key);await self.clients.claim();})()));

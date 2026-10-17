@@ -10,6 +10,8 @@ const time=s=>typeof s==='string'&&/^([01]\d|2[0-3]):[0-5]\d$/.test(s);
 function valid(x){
  if(!x||x.v!==3||JSON.stringify(x).length>1200)return false;
  if(x.kind==='settings')return ['wake','wind','bed'].every(k=>time(x[k]))&&x.wake!==x.wind;
+ if(x.kind==='water')return validDay(x.day)&&Number.isFinite(x.at)&&Number.isInteger(x.amount)&&x.amount>=50&&x.amount<=1500;
+ if(x.kind==='awake')return validDay(x.night);
  if(x.kind==='task')return typeof x.title==='string'&&x.title.trim().length>0&&x.title.length<=55&&['anchor','flex','play'].includes(x.type)&&time(x.time)&&Number.isInteger(x.duration)&&x.duration>0&&x.duration<=720&&['once','weekly'].includes(x.repeat)&&validDay(x.date)&&Array.isArray(x.days)&&x.days.every(d=>Number.isInteger(d)&&d>=0&&d<=6)&&(x.repeat==='once'||x.days.length>0)&&typeof x.card==='string';
  if(x.kind==='override')return typeof x.task==='string'&&validDay(x.day)&&['pending','done','skipped','deferred'].includes(x.status)&&(!x.time||time(x.time));
  if(x.kind==='timer')return typeof x.title==='string'&&x.title.length<=55&&Number.isFinite(x.start)&&Number.isFinite(x.end)&&x.end>x.start&&Number.isInteger(x.estimate)&&x.estimate>0&&x.estimate<=240;
@@ -32,6 +34,9 @@ function plan(items,start,limit,rest){
   else moves.push({task:t.id,status:'deferred'});
  }return moves;
 }
-const api={date,minutes,clock,shift,validDay,valid,occurrences,plan};
+function sleepNight(settings,at){const m=at.getHours()*60+at.getMinutes(),a=minutes(settings.wind),b=minutes(settings.wake),today=date(at);if(a===b)return null;if(a>b)return m>=a?today:m<b?shift(today,-1):null;return m>=a&&m<b?today:null;}
+function sleepActive(settings,at,records=[]){const night=sleepNight(settings,at);return night!==null&&!records.some(r=>r.kind==='awake'&&r.night===night);}
+function timerReminder(timer,settings,at){if(!timer||at.getTime()<timer.end)return false;const startDay=date(new Date(timer.start)),today=date(at);return startDay===today||at.getHours()*60+at.getMinutes()<minutes(settings.wake);}
+const api={date,minutes,clock,shift,validDay,valid,occurrences,plan,sleepNight,sleepActive,timerReminder};
 if(typeof module!=='undefined')module.exports=api;root.MeaningNav=api;
 })(typeof window==='undefined'?globalThis:window);
