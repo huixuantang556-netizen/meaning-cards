@@ -51,9 +51,22 @@ function missingReferences(state){
  for(const r of state.records){const v=r.value;for(const field of ['topicIds','relatedIds','evidenceForIds','evidenceAgainstIds'])for(const id of v[field]||[]){if(typeof id!=='string')throw Error('引用 ID 必须为文字');if(!ids.has(id))missing.push({from:r.sourceId,to:id});}if(r.group==='links')for(const field of ['fromId','toId'])if(!ids.has(v[field]))missing.push({from:r.sourceId,to:v[field]});}
  return missing;
 }
+// Read-only dependency preview: choosing an evidence suggestion never implies consent to import its hypothesis.
+function selectionIssues(state,plan,choices){
+ const records=clone(state.records);
+ for(const row of plan.rows){if(choices[row.key]!=='import'||row.action==='same')continue;const r={group:row.group,sourceId:row.sourceId,value:clone(row.value)};const i=records.findIndex(old=>key(old.group,old.sourceId)===row.key);if(i<0)records.push(r);else records[i]=r;}
+ const issues=[];
+ for(const m of missingReferences({records})){const target=plan.rows.find(r=>r.sourceId===m.to);issues.push({id:m.to,group:target?.group||'',from:m.from,reason:'所选记录引用了它'});}
+ for(const row of plan.updates){if(choices[row.key]!=='import')continue;const u=row.value;
+  if(!records.some(r=>r.group==='workingHypotheses'&&r.sourceId===u.id))issues.push({id:u.id,group:'workingHypotheses',from:row.key,reason:'追加证据前需先保存这条假说'});
+  if(!records.some(r=>r.group==='lifeEvents'&&r.sourceId===u.appendEvidenceForId))issues.push({id:u.appendEvidenceForId,group:'lifeEvents',from:row.key,reason:'追加证据前需先保存这条经历'});
+ }
+ return issues.filter((r,i)=>issues.findIndex(x=>x.id===r.id&&x.group===r.group)===i);
+}
 function checkpoint(state){const n=clone(state);n.undo=null;return n;}
 function apply(state,plan,choices,at,options={}){
  validate(state);if(state.revision!==plan.baseRevision)throw Error('档案已变化，请重新预览');
+ const issues=selectionIssues(state,plan,choices);if(issues.length)throw Error('尚未保存：关联记录未导入 '+issues.map(x=>x.id).join('、')+'。请点击下方「查看」按钮，阅读后决定是否保存为候选；也可取消引用它们的条目或追加证据建议。');
  const n=clone(state);n.undo=checkpoint(state);let changed=0;
  for(const row of plan.rows){const choice=choices[row.key]||'keep';if(choice!=='import'||row.action==='same')continue;
   const i=n.records.findIndex(r=>key(r.group,r.sourceId)===row.key);
@@ -61,7 +74,7 @@ function apply(state,plan,choices,at,options={}){
   else{const r=n.records[i];r.history.push({value:clone(r.value),at,reason:'用户在导入预览选择采用新版本',source:r.source,sourceVariants:clone(r.sourceVariants||[])});r.value=clone(row.value);r.updatedAt=at;r.source=row.source;if(row.sourceVariants)r.sourceVariants=clone(row.sourceVariants);}
   changed++;
  }
- for(const row of plan.updates){if(choices[row.key]!=='import')continue;const u=row.value,r=n.records.find(r=>r.group==='workingHypotheses'&&r.sourceId===u.id);if(!r)throw Error('要追加证据的假说尚未导入');if(!n.records.some(r=>r.group==='lifeEvents'&&r.sourceId===u.appendEvidenceForId))throw Error('要追加的事件尚未导入');
+ for(const row of plan.updates){if(choices[row.key]!=='import')continue;const u=row.value,r=n.records.find(r=>r.group==='workingHypotheses'&&r.sourceId===u.id);if(!r)throw Error('要追加证据的假说 '+u.id+' 尚未导入');if(!n.records.some(r=>r.group==='lifeEvents'&&r.sourceId===u.appendEvidenceForId))throw Error('要追加的事件 '+u.appendEvidenceForId+' 尚未导入');
   const refs=r.value.evidenceForIds||[];if(!refs.includes(u.appendEvidenceForId)){r.history.push({value:clone(r.value),at,reason:'用户接受一项追加证据建议；不提高置信度',source:row.source});r.value.evidenceForIds=[...refs,u.appendEvidenceForId];r.value.importCautions=[...(r.value.importCautions||[]),u.caution||'单次观察，有限证据'];r.updatedAt=at;changed++;}
  }
  if(!changed)throw Error('没有选择新的内容；未改动档案');
@@ -79,6 +92,6 @@ async function createKey(pass,crypto){const salt=crypto.getRandomValues(new Uint
 async function seal(state,session,crypto,options={}){validate(state);const raw=JSON.stringify(state);if(bytes(raw).length>(options.limit||1600000))throw Error('档案过大，未写入；请减少本次导入或保留外部备份');const iv=crypto.getRandomValues(new Uint8Array(12));const encrypted=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:bytes(FORMAT)},session.key,bytes(raw));return JSON.stringify({format:FORMAT,version:1,kdf:'PBKDF2-SHA256',iterations:ITERATIONS,salt:b64(session.salt),iv:b64(iv),ciphertext:b64(new Uint8Array(encrypted))});}
 async function open(raw,pass,crypto){let e;try{e=JSON.parse(raw);}catch{throw Error('加密备份格式错误');}if(e.format!==FORMAT||e.version!==1||e.kdf!=='PBKDF2-SHA256'||e.iterations!==ITERATIONS)throw Error('不支持的加密备份版本');const salt=unb64(e.salt),iv=unb64(e.iv),ciphertext=unb64(e.ciphertext);if(salt.length!==16||iv.length!==12)throw Error('加密参数无效');const session={key:await derive(pass,salt,crypto),salt};let clear;try{clear=await crypto.subtle.decrypt({name:'AES-GCM',iv,additionalData:bytes(FORMAT)},session.key,ciphertext);}catch{throw Error('口令不正确，或备份已损坏');}let state;try{state=validate(JSON.parse(fromBytes(clear)));}catch{throw Error('解密后数据不兼容，请保留原始备份');}return {session,state};}
 async function commit(storage,expected,next,session,crypto){const raw=await seal(next,session,crypto);if(storage.getItem(KEY)!==expected)throw Error('另一页面更新了档案，请锁定后重新打开；本次未覆盖');storage.setItem(KEY,raw);return raw;}
-const api={KEY,FORMAT,groups,clone,canonical,key,empty,validate,parseFiles,preview,missingReferences,apply,undo,remove,createKey,seal,open,commit};
+const api={KEY,FORMAT,groups,clone,canonical,key,empty,validate,parseFiles,preview,missingReferences,selectionIssues,apply,undo,remove,createKey,seal,open,commit};
 root.MeaningPrivate=api;if(typeof module!=='undefined')module.exports=api;
 })(typeof window==='undefined'?globalThis:window);
