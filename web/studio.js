@@ -2,7 +2,7 @@
 'use strict';
 const $=id=>document.getElementById(id),h=esc,C=window.MeaningStudio,N=window.MeaningNav;
 const groups=[['today','☀','今天','日程与生活记录'],['manager','◷','智慧管家','弹性规划与温和复盘'],['care','♡','照顾自己','恢复、情绪与习惯'],['explore','✎','思考与认知','想法与意义卡片'],['profile','✦','认识自己','经历、假说与证据'],['settings','⚙','设置','账号、同步与备份']];
-const labels={manager:'智慧生活管家',compass:'人生罗盘',today:'今天',care:'照顾自己',haven:'情绪避风港',habits:'原子习惯',journal:'自我观察',explore:'思考与认知',thought:'思考工作室',cards:'认知卡片',create:'创作卡片',profile:'认识自己',settings:'设置',data:'账号与数据',private:'导入与原始档案'};
+const labels={calendar:'时间日历',manager:'智慧生活管家',compass:'人生罗盘',today:'今天',care:'照顾自己',haven:'情绪避风港',habits:'原子习惯',journal:'自我观察',explore:'思考与认知',thought:'思考工作室',cards:'认知卡片',create:'创作卡片',profile:'认识自己',settings:'设置',data:'账号与数据',private:'导入与原始档案'};
 const nav=document.querySelector('.tabs');nav.classList.add('studio-nav');nav.innerHTML=groups.map(([id,icon,label,hint])=>`<button class="tab" data-view="${id}"><span aria-hidden="true">${icon}</span><span>${label}<small>${hint}</small></span></button>`).join('');nav.querySelectorAll('button').forEach(b=>b.onclick=()=>setView(b.dataset.view));
 const trail=document.createElement('div');trail.id='studioTrail';trail.className='studio-trail';document.querySelector('main').before(trail);
 const shell=document.querySelector('main');

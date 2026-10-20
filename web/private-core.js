@@ -8,9 +8,10 @@ const canonical=x=>x===null||typeof x!=='object'?JSON.stringify(x):Array.isArray
 const key=(group,id)=>JSON.stringify([group,id]);
 const empty=()=>({schema:1,revision:0,records:[],sources:[],undo:null});
 function validate(s){
- if(!s||![1,2].includes(s.schema)||!Number.isInteger(s.revision)||s.revision<0||!Array.isArray(s.records)||!Array.isArray(s.sources)||s.records.length>5000)throw Error('档案格式或版本不兼容，请更新所有设备的网页');
+ if(!s||![1,2,3].includes(s.schema)||!Number.isInteger(s.revision)||s.revision<0||!Array.isArray(s.records)||!Array.isArray(s.sources)||s.records.length>5000)throw Error('档案格式或版本不兼容，请更新所有设备的网页');
  if(s.schema===1&&s.compass!==undefined)throw Error('人生罗盘需要新版资料格式，未覆盖');
- if(s.schema===2){const C=root.MeaningCompass||(typeof require!=='undefined'?require('./compass-core.js'):null);if(!C||!s.compass)throw Error('人生罗盘版本不兼容，请更新网页');C.validate(s.compass);}
+ if(s.schema>=2){const C=root.MeaningCompass||(typeof require!=='undefined'?require('./compass-core.js'):null);if(!C||!s.compass)throw Error('人生罗盘版本不兼容，请更新网页');C.validate(s.compass);}
+ if(s.schema===3){const D=root.MeaningTimeCalendar||(typeof require!=='undefined'?require('./time-calendar-core.js'):null);if(!D||!s.timeCalendar)throw Error('时间日历版本不兼容，请更新网页');D.validate(s.timeCalendar);}else if(s.timeCalendar!==undefined)throw Error('时间日历需要新版资料格式');
  const ids=new Set(),entityIds=new Set();for(const r of s.records){if(!r||!groups.includes(r.group)||typeof r.sourceId!=='string'||!r.value||r.value.id!==r.sourceId||!Array.isArray(r.history))throw Error('条目格式不完整');const k=key(r.group,r.sourceId);if(ids.has(k))throw Error('存在重复 ID');ids.add(k);if(r.group!=='links'){if(entityIds.has(r.sourceId))throw Error('不同类别出现相同 ID，引用可能有歧义');entityIds.add(r.sourceId);}}
  for(const f of s.sources)if(typeof f.name!=='string'||typeof f.text!=='string')throw Error('来源文件格式不兼容');
  if(s.undo){const previous=clone(s.undo);if(previous.undo)throw Error('撤销快照不兼容');validate(previous);}
@@ -84,7 +85,7 @@ function apply(state,plan,choices,at,options={}){
  const missing=missingReferences(n);if(missing.length){const ids=[...new Set(missing.map(x=>x.to))];throw Error('尚未保存：以下关联记录未导入：'+ids.slice(0,20).join('、')+'。请展开对应编号并确认是否保存；有不同原文的条目只作为候选保留，不会合并定论。也可取消引用它们的条目。');}
  n.revision++;validate(n);return n;
 }
-function undo(state){if(!state.undo)throw Error('没有可撤销的操作');const n={...clone(state),...clone(state.undo)};if(state.compass){n.compass=clone(state.compass);n.schema=2;}n.revision=state.revision+1;n.undo=null;return validate(n);}
+function undo(state){if(!state.undo)throw Error('没有可撤销的操作');const n={...clone(state),...clone(state.undo)};if(state.compass){n.compass=clone(state.compass);n.schema=2;}if(state.timeCalendar){n.timeCalendar=clone(state.timeCalendar);n.schema=3;}n.revision=state.revision+1;n.undo=null;return validate(n);}
 function remove(state,group,id){const affected=state.records.filter(r=>r.group==='links'&&(r.value.fromId===id||r.value.toId===id));if(affected.length)throw Error('还有显式连接指向此记录，暂不能单独删除');if(state.records.some(r=>['topicIds','relatedIds','evidenceForIds','evidenceAgainstIds'].some(f=>(r.value[f]||[]).includes(id))))throw Error('还有记录引用此条目，暂不能单独删除');const n=clone(state);n.undo=checkpoint(state);n.records=n.records.filter(r=>key(r.group,r.sourceId)!==key(group,id));n.revision++;return n;}
 const bytes=x=>new TextEncoder().encode(x),fromBytes=x=>new TextDecoder().decode(x);
 function b64(a){let s='';for(const b of a)s+=String.fromCharCode(b);return btoa(s);}
