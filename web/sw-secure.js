@@ -1,5 +1,5 @@
 /* Cache public application assets only. Never intercept Supabase or private payloads. */
-const CACHE='meaning-e2ee-shell-v10';
+const CACHE='meaning-e2ee-shell-v11';
 const FILES=['./','./index.html','./style.css','./v2.css','./v3.css','./thought.css','./private-vault.css','./secure-sync.css','./config.js','./app.js','./sync.js','./navigation-core.js','./v2.js','./v3.js','./thought-core.js','./thought.js','./private-core.js','./private-vault.js','./device-key.js','./secure-core.js','./studio-core.js','./studio.js','./studio.css','./compass-core.js','./compass.js','./compass.css','./manager-core.js','./manager.js','./manager.css','./ai-bridge-core.js','./ai-bridge.js','./ai-bridge.css','./boot.js','./boot.css','./time-calendar-core.js','./time-calendar.js','./time-calendar.css','./offline-setup.js'];
 const paths=new Set(FILES.map(p=>new URL(p,self.location).pathname));
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES))));
